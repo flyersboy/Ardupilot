@@ -197,11 +197,27 @@ char AP_Tramp::receive_response()
         return 0;
     }
 
-    bool ignore_leading_zero = AP::vtx().has_option(AP_VideoTX::VideoOptions::VTX_TRAMP_IGNORE_FIRST_BYTE);
+    const bool ignore_leading_zero = AP::vtx().has_option(AP_VideoTX::VideoOptions::VTX_TRAMP_IGNORE_FIRST_BYTE);
+
+    // Diagnostic build: report the parser state without changing parser behaviour.
+    const uint16_t available = port->available();
+    const uint16_t bytesNeeded = (TRAMP_BUF_SIZE - receive_pos) + ignore_leading_zero;
+    const uint32_t now_ms = AP_HAL::millis();
+    static uint32_t last_summary_ms;
+    static uint32_t last_event_ms;
+    static uint32_t last_frame_ms;
+
+    if (now_ms - last_summary_ms >= 1000) {
+        GCS_SEND_TEXT(MAV_SEVERITY_INFO,
+                      "TRD s%u b%ld a%u n%u t%u r%u",
+                      static_cast<unsigned>(status), long(_smartbaud),
+                      unsigned(available), unsigned(bytesNeeded),
+                      unsigned(_packets_sent), unsigned(_packets_rcvd));
+        last_summary_ms = now_ms;
+    }
 
     // wait for complete packet
-    const uint16_t bytesNeeded = (TRAMP_BUF_SIZE - receive_pos) + ignore_leading_zero;
-    if (port->available() < bytesNeeded) {
+    if (available < bytesNeeded) {
         return 0;
     }
 
@@ -215,11 +231,19 @@ char AP_Tramp::receive_response()
         const int16_t b = port->read();
         if (b < 0) {
             // uart claimed bytes available, but there were none
+            if (now_ms - last_event_ms >= 500) {
+                GCS_SEND_TEXT(MAV_SEVERITY_INFO, "TRD read<0 i%u", unsigned(i));
+                last_event_ms = now_ms;
+            }
             return 0;
         }
         const uint8_t c = uint8_t(b);
         // some VTX's send a spurious extra 0 byte
         if (c == 0 && ignore_leading_zero && receive_pos == 0) {
+            if (now_ms - last_event_ms >= 500) {
+                GCS_SEND_TEXT(MAV_SEVERITY_INFO, "TRD skip00 a%u", unsigned(available));
+                last_event_ms = now_ms;
+            }
             continue;
         }
 
@@ -231,6 +255,12 @@ char AP_Tramp::receive_response()
                 // Found header byte, advance to wait for code
                 receive_state = ReceiveState::S_WAIT_CODE;
             } else {
+                if (now_ms - last_event_ms >= 500) {
+                    GCS_SEND_TEXT(MAV_SEVERITY_INFO,
+                                  "TRD badhdr %02X opt%u", unsigned(c),
+                                  unsigned(AP::vtx().get_configured_options()));
+                    last_event_ms = now_ms;
+                }
                 // Unexpected header, reset state machine
                 reset_receiver();
             }
@@ -241,6 +271,10 @@ char AP_Tramp::receive_response()
                 // Code is for response is one we're interested in, advance to data
                 receive_state = ReceiveState::S_DATA;
             } else {
+                if (now_ms - last_event_ms >= 500) {
+                    GCS_SEND_TEXT(MAV_SEVERITY_INFO, "TRD badcode %02X", unsigned(c));
+                    last_event_ms = now_ms;
+                }
                 // Unexpected code, reset state machine
                 reset_receiver();
             }
@@ -250,6 +284,27 @@ char AP_Tramp::receive_response()
             if (receive_pos == TRAMP_BUF_SIZE) {
                 // Buffer is full, calculate checksum
                 const uint8_t cksum = checksum(response_buffer);
+
+                if (now_ms - last_frame_ms >= 1000) {
+                    GCS_SEND_TEXT(MAV_SEVERITY_INFO,
+                                  "TRD0 %02X %02X %02X %02X %02X %02X %02X %02X",
+                                  unsigned(response_buffer[0]), unsigned(response_buffer[1]),
+                                  unsigned(response_buffer[2]), unsigned(response_buffer[3]),
+                                  unsigned(response_buffer[4]), unsigned(response_buffer[5]),
+                                  unsigned(response_buffer[6]), unsigned(response_buffer[7]));
+                    GCS_SEND_TEXT(MAV_SEVERITY_INFO,
+                                  "TRD1 %02X %02X %02X %02X %02X %02X %02X %02X",
+                                  unsigned(response_buffer[8]), unsigned(response_buffer[9]),
+                                  unsigned(response_buffer[10]), unsigned(response_buffer[11]),
+                                  unsigned(response_buffer[12]), unsigned(response_buffer[13]),
+                                  unsigned(response_buffer[14]), unsigned(response_buffer[15]));
+                    GCS_SEND_TEXT(MAV_SEVERITY_INFO,
+                                  "TRD ck%02X/%02X z%02X c%c",
+                                  unsigned(cksum), unsigned(response_buffer[TRAMP_BUF_SIZE-2]),
+                                  unsigned(response_buffer[TRAMP_BUF_SIZE-1]),
+                                  char(response_buffer[1]));
+                    last_frame_ms = now_ms;
+                }
 
                 // Reset state machine ready for next response
                 reset_receiver();
@@ -552,6 +607,7 @@ void AP_Tramp::update_baud_rate()
     _smartbaud += VTX_TRAMP_SMARTBAUD_STEP * int32_t(_smartbaud_direction);
 
     debug("autobaud: %d", int(_smartbaud));
+    GCS_SEND_TEXT(MAV_SEVERITY_INFO, "TRD baud %ld", long(_smartbaud));
 
     port->discard_input();
     port->begin(_smartbaud);
@@ -577,6 +633,9 @@ bool AP_Tramp::init(void)
 
         port->begin(AP_TRAMP_UART_BAUD, AP_TRAMP_UART_BUFSIZE_RX, AP_TRAMP_UART_BUFSIZE_TX);
         debug("port opened");
+        GCS_SEND_TEXT(MAV_SEVERITY_INFO,
+                      "TRD init b%u opt%u", unsigned(AP_TRAMP_UART_BAUD),
+                      unsigned(AP::vtx().get_configured_options()));
 
         AP::vtx().set_provider_enabled(AP_VideoTX::VTXType::Tramp);
 
