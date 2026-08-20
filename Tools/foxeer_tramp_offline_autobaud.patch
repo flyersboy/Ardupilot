@@ -1,0 +1,16 @@
+diff --git a/libraries/AP_VideoTX/AP_Tramp.cpp b/libraries/AP_VideoTX/AP_Tramp.cpp
+--- a/libraries/AP_VideoTX/AP_Tramp.cpp
++++ b/libraries/AP_VideoTX/AP_Tramp.cpp
+@@ -356,8 +356,11 @@ void AP_Tramp::process_requests()
+         if (replyCode == 'r') {
+             // Device replied to reset? request, enter init
+             set_status(TrampStatus::TRAMP_STATUS_INIT);
+         } else if ((now - last_time_us) >= TRAMP_MIN_REQUEST_PERIOD_US) {
++            // If the VTX does not answer the initial reset query at exactly
++            // 9600 baud, scan the configured Tramp smartbaud range while
++            // still offline instead of waiting forever for INIT.
++            update_baud_rate();
+             // Min request period exceeded, issue another reset?
+             send_query('r');
+ 
+             // Update last time
