@@ -51,6 +51,7 @@ public:
         VTX_SA_ONE_STOP_BIT   = (1 << 5),
         VTX_SA_IGNORE_CRC     = (1 << 6),
         VTX_CRSF_IGNORE_STAT  = (1 << 7),
+        VTX_TRAMP_IGNORE_FIRST_BYTE  = (1 << 8),
     };
 
     static const char *band_names[];
@@ -114,6 +115,10 @@ public:
     void set_configured_power_mw(uint16_t power);
     uint16_t get_configured_power_mw() const { return _power_mw; }
     uint16_t get_power_mw() const { return _power_levels[_current_power].mw; }
+    // VTX-reported actual power; -1 if the provider doesn't report it, 0 is pit mode
+    void set_actual_power_mw(uint16_t power) { _actual_power_mw = int32_t(power); }
+    int32_t get_actual_power_mw() const { return _actual_power_mw; }
+    uint16_t get_max_power_mw() const { return _max_power_mw; }
 
     // get the power in dbm, rounding appropriately
     uint8_t get_configured_power_dbm() const {
@@ -187,6 +192,7 @@ private:
     // power output in mw
     AP_Int16 _power_mw;
     uint16_t _current_power;
+    int32_t _actual_power_mw {-1};
     AP_Int16 _max_power_mw;
 
     // frequency band
