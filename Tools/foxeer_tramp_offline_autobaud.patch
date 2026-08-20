@@ -1,7 +1,7 @@
 diff --git a/libraries/AP_VideoTX/AP_Tramp.cpp b/libraries/AP_VideoTX/AP_Tramp.cpp
 --- a/libraries/AP_VideoTX/AP_Tramp.cpp
 +++ b/libraries/AP_VideoTX/AP_Tramp.cpp
-@@ -356,8 +356,11 @@ void AP_Tramp::process_requests()
+@@ -356,8 +356,12 @@ void AP_Tramp::process_requests()
          if (replyCode == 'r') {
              // Device replied to reset? request, enter init
              set_status(TrampStatus::TRAMP_STATUS_INIT);
