@@ -37,7 +37,7 @@ const AP_Param::GroupInfo AP_VideoTX::var_info[] = {
     // @Param: POWER
     // @DisplayName: Video Transmitter Power Level
     // @Description: Video Transmitter Power Level. Different VTXs support different power levels, the power level chosen will be rounded down to the nearest supported power level
-    // @Range: 1 1000
+    // @Range: 1 2000
     AP_GROUPINFO("POWER",    2, AP_VideoTX, _power_mw, 0),
 
     // @Param: CHANNEL
@@ -66,13 +66,13 @@ const AP_Param::GroupInfo AP_VideoTX::var_info[] = {
     // @DisplayName: Video Transmitter Options
     // @Description: Video Transmitter Options. Pitmode puts the VTX in a low power state. Unlocked enables certain restricted frequencies and power levels. Do not enable the Unlocked option unless you have appropriate permissions in your jurisdiction to transmit at high power levels. One stop-bit may be required for VTXs that erroneously mimic iNav behaviour.
     // @User: Advanced
-    // @Bitmask: 0:Pitmode,1:Pitmode until armed,2:Pitmode when disarmed,3:Unlocked,4:Add leading zero byte to requests,5:Use 1 stop-bit in SmartAudio,6:Ignore CRC in SmartAudio,7:Ignore status updates in CRSF and blindly set VTX options
+    // @Bitmask: 0:Pitmode,1:Pitmode until armed,2:Pitmode when disarmed,3:Unlocked,4:Add leading zero byte to requests,5:Use 1 stop-bit in SmartAudio,6:Ignore CRC in SmartAudio,7:Ignore status updates in CRSF and blindly set VTX options,8:Ignore leading byte in Tramp requests
     AP_GROUPINFO("OPTIONS",  6, AP_VideoTX, _options, 0),
 
     // @Param: MAX_POWER
     // @DisplayName: Video Transmitter Max Power Level
     // @Description: Video Transmitter Maximum Power Level. Different VTXs support different power levels, this prevents the power aux switch from requesting too high a power level. The switch supports 6 power levels and the selected power will be a subdivision between 0 and this setting.
-    // @Range: 25 1000
+    // @Range: 25 2000
     AP_GROUPINFO("MAX_POWER", 7, AP_VideoTX, _max_power_mw, 800),
 
     AP_GROUPEND
@@ -118,6 +118,8 @@ AP_VideoTX::PowerLevel AP_VideoTX::_power_levels[VTX_MAX_POWER_LEVELS] = {
     { 0x12, 600,  28, 0xFF }, // Tramp lies above power levels and always returns 25/100/200/400/600
     { 3,    800,  29, 40   },
     { 0x13, 1000, 30, 0xFF }, // only in SA 2.1
+    { 0xFF, 1600, 32, 0xFF }, // 1.6W, common on high-power Tramp VTXs
+    { 0xFF, 2000, 33, 0xFF }, // 2W
     { 0xFF, 0,    0,  0XFF, PowerActive::Inactive }  // slot reserved for a custom power level
 };
 
@@ -276,9 +278,22 @@ void AP_VideoTX::set_power_mw(uint16_t power)
     for (uint8_t i = 0; i < VTX_MAX_POWER_LEVELS; i++) {
         if (power == _power_levels[i].mw) {
             _current_power = i;
-            break;
+            return;
         }
     }
+    // power 0 (pit mode) should always match the built-in 0mW entry; bail
+    // here so it can never reach log10f below
+    if (power == 0) {
+        return;
+    }
+    // non-standard value (e.g. Tramp 2500mW): stash it in the custom slot
+    PowerLevel &slot = _power_levels[VTX_MAX_POWER_LEVELS - 1];
+    slot.mw = power;
+    slot.dbm = uint8_t(roundf(10.0f * log10f(float(power))));
+    slot.level = 255;
+    slot.dac = 255;
+    slot.active = PowerActive::Active;
+    _current_power = VTX_MAX_POWER_LEVELS - 1;
 }
 
 // set the power "level"
@@ -401,6 +416,10 @@ bool AP_VideoTX::update_power() const {
             && _power_levels[i].active != PowerActive::Inactive) {
             return true;
         }
+    }
+    // Tramp accepts arbitrary mW; the table check above is SmartAudio-only
+    if (_power_mw > 0 && is_provider_enabled(VTXType::Tramp)) {
+        return true;
     }
     // asked for something unsupported - only SA2.1 allows this and will have already provided a list
     return false;
